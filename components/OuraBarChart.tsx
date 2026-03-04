@@ -56,7 +56,7 @@ export function OuraBarChart({
 }: OuraBarChartProps) {
   const valueFormatter = FORMATTERS[format] ?? FORMATTERS.default;
   const [range, setRange] = useState<"day" | "week" | "month">("week");
-  const [data, setData] = useState<Array<Record<string, unknown>>[]>([]);
+  const [data, setData] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,7 +118,7 @@ export function OuraBarChart({
 
   const chartData = data.map((d) => ({
     ...d,
-    label: formatDate(String(d.day)),
+    label: formatDate(String(d["day"] ?? "")),
   }));
 
   return (
