@@ -1,0 +1,135 @@
+// Prisma schema for Health Tracker
+// See: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User linked to Supabase auth (id = auth.users.id). Stores Oura tokens.
+model User {
+  id                   String    @id // Supabase auth user id (uuid)
+  ouraAccessToken      String?
+  ouraRefreshToken     String?
+  ouraTokenExpiresAt   DateTime?
+  appleHealthApiKey    String?   @unique @map("apple_health_api_key")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  ouraData             OuraData[]
+
+  @@map("users")
+}
+
+// Cached Oura ring data for offline/expired-token display
+model OuraData {
+  id       String   @id @default(cuid())
+  userId   String
+  type     String   // sleep, activity, readiness, sleep_score, spo2, stress, workout, heartrate, sleep_time
+  day      String   // YYYY-MM-DD
+  data     Json     // chart row (day + type-specific fields)
+  syncedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, day])
+  @@index([userId, type])
+  @@map("oura_data")
+}
+
+// Temporary state for OAuth flow; links Oura callback to the user who initiated.
+model OAuthState {
+  id        String   @id @default(cuid())
+  state     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("oauth_states")
+}
+
+// Granular sleep data for dashboard (synced from Oura or manual)
+model SleepData {
+  id              String    @id @default(cuid())
+  userId          String    @map("user_id")
+  day             String    // YYYY-MM-DD
+  sleepStages     Int[]     @default([]) @map("sleep_stages") // 1=Awake, 2=Light, 3=Deep, 4=REM, each = 5 min
+  sleepScore      Int?      @map("sleep_score")
+  totalSleepTime  Int?      @map("total_sleep_time") // seconds
+  awakeTime       Int?      @map("awake_time") // seconds
+  avgHr           Decimal?  @db.Decimal(5, 2) @map("avg_hr")
+  bedtimeStart    DateTime? @map("bedtime_start")
+  bedtimeEnd      DateTime? @map("bedtime_end")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, day])
+  @@index([userId, day])
+  @@map("sleep_data")
+}
+
+// Apple Health workouts (from Watch/iPhone)
+model AppleHealthWorkout {
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  activityType String    @map("activity_type") // Running, Walking, Cycling, etc.
+  startDate    DateTime  @map("start_date")
+  endDate      DateTime  @map("end_date")
+  duration     Int?      // seconds
+  calories     Float?
+  distance     Float?    // meters
+  sourceName   String?   @map("source_name") // "Apple Watch", "iPhone"
+  sourceId     String?   @map("source_id") // for dedup
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, startDate])
+  @@map("apple_health_workouts")
+}
+
+// Apple Health metrics (steps, heart rate, etc.)
+model AppleHealthRecord {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  type       String   // HKQuantityTypeIdentifierStepCount, HKQuantityTypeIdentifierHeartRate, etc.
+  value      Float
+  unit       String?
+  startDate  DateTime @map("start_date")
+  endDate    DateTime? @map("end_date")
+  sourceName String?  @map("source_name")
+  sourceId   String?  @map("source_id") // for dedup
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([userId, type, startDate])
+  @@map("apple_health_records")
+}
+
+// Apple Health activity summaries (daily rings)
+model AppleHealthActivitySummary {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  date            String   // YYYY-MM-DD
+  activeEnergy    Float?   @map("active_energy") // kcal
+  exerciseMinutes Int?     @map("exercise_minutes")
+  standHours      Int?     @map("stand_hours")
+  sourceId        String?  @map("source_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("apple_health_activity_summaries")
+}
+
+// One health entry per record (e.g. weight, steps, mood for a given day)
+model HealthEntry {
+  id          String   @id @default(cuid())
+  userId      String   // Supabase auth user id
+  type        String   // e.g. "weight", "steps", "mood", "sleep_hours"
+  value       Float    // numeric value (kg, steps, 1-10 mood, hours)
+  unit        String?  // e.g. "kg", "steps", "hours"
+  recordedAt  DateTime @default(now())
+  note        String?
+
+  @@map("health_entries")
+}

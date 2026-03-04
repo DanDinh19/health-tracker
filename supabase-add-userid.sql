@@ -1,0 +1,9 @@
+-- Run this in Supabase SQL Editor if you have existing health_entries and need to add userId.
+-- Option A: If you have no important data, drop and recreate:
+--   DROP TABLE IF EXISTS public.health_entries;
+--   Then run: npm run db:push
+--
+-- Option B: Add column and migrate (replace 'YOUR-USER-ID' with a real Supabase auth user id to assign old rows to):
+--   ALTER TABLE public.health_entries ADD COLUMN IF NOT EXISTS "userId" TEXT;
+--   UPDATE public.health_entries SET "userId" = 'YOUR-USER-ID' WHERE "userId" IS NULL;
+--   ALTER TABLE public.health_entries ALTER COLUMN "userId" SET NOT NULL;
