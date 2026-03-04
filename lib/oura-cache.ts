@@ -9,7 +9,8 @@ export type OuraDataType =
   | "stress"
   | "workout"
   | "heartrate"
-  | "sleep_time";
+  | "sleep_time"
+  | "resilience";
 
 export async function saveOuraData(
   userId: string,
