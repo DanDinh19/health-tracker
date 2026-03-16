@@ -26,9 +26,16 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const getUserWithTimeout = () =>
+      Promise.race([
+        supabase.auth.getUser(),
+        new Promise<{ data: { user: null }; error: null }>((resolve) =>
+          setTimeout(() => resolve({ data: { user: null }, error: null }), 5000)
+        ),
+      ]);
+    const { data: { user } } = await getUserWithTimeout();
 
-      const isLoginPage = request.nextUrl.pathname === "/login";
+    const isLoginPage = request.nextUrl.pathname === "/login";
     const isAuthCallback = request.nextUrl.pathname.startsWith("/api/oura/callback");
     const isOuraConnect = request.nextUrl.pathname === "/api/oura/connect";
     const isStatic = request.nextUrl.pathname.startsWith("/_next") || request.nextUrl.pathname.includes(".");

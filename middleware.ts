@@ -7,7 +7,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip middleware for static assets, ingest API (uses API key auth), and common paths
-    "/((?!_next/static|_next/image|favicon.ico|api/apple-health/ingest|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // Skip middleware for API routes (they handle auth themselves), static assets
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
