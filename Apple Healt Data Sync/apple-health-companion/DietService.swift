@@ -24,6 +24,29 @@ struct MealSummary: Decodable {
     let total_kcal: Double
 }
 
+struct MealDetailItem: Decodable {
+    let id: String
+    let food_name: String
+    let quantity: Double
+    let unit: String
+    let kcal: Double
+    let protein_g: Double
+    let carbs_g: Double
+    let fat_g: Double
+}
+
+struct MealDetailResponse: Decodable {
+    let id: String
+    let timestamp: String
+    let meal_type: String
+    let photo_url: String?
+    let total_kcal: Double
+    let total_protein_g: Double
+    let total_carbs_g: Double
+    let total_fat_g: Double
+    let items: [MealDetailItem]
+}
+
 struct MealAnalyzeItem: Decodable {
     let id: String
     let name: String
@@ -174,6 +197,69 @@ final class DietService {
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+    }
+
+    func fetchMeal(id: String) async throws -> MealDetailResponse {
+        guard !apiKey.isEmpty else { throw DietError.unauthorized }
+        guard !baseURL.contains("your-app.vercel.app") else { throw DietError.invalidURL }
+
+        guard let url = URL(string: "\(baseURL)/api/meal/\(id)") else { throw DietError.invalidURL }
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+        return try JSONDecoder().decode(MealDetailResponse.self, from: data)
+    }
+
+    func updateMeal(
+        id: String,
+        timestamp: String,
+        mealType: String,
+        items: [EditableMealItem]
+    ) async throws {
+        guard !apiKey.isEmpty else { throw DietError.unauthorized }
+        guard !baseURL.contains("your-app.vercel.app") else { throw DietError.invalidURL }
+
+        guard let url = URL(string: "\(baseURL)/api/meal/\(id)") else { throw DietError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+
+        let payload: [String: Any] = [
+            "timestamp": timestamp,
+            "meal_type": mealType,
+            "items": items.map { item in
+                [
+                    "food_name": item.name,
+                    "quantity": item.quantity,
+                    "unit": item.unit,
+                    "kcal": item.kcal,
+                    "protein_g": item.proteinG,
+                    "carbs_g": item.carbsG,
+                    "fat_g": item.fatG,
+                ] as [String: Any]
+            },
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await session.data(for: request)
+        try checkResponse(response, data: data)
+    }
+
+    func deleteMeal(id: String) async throws {
+        guard !apiKey.isEmpty else { throw DietError.unauthorized }
+        guard !baseURL.contains("your-app.vercel.app") else { throw DietError.invalidURL }
+
+        guard let url = URL(string: "\(baseURL)/api/meal/\(id)") else { throw DietError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
 
         let (data, response) = try await session.data(for: request)
         try checkResponse(response, data: data)

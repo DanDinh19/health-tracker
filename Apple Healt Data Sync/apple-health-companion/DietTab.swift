@@ -9,6 +9,8 @@ struct DietTab: View {
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var showLogSheet = false
+    @State private var showEditSheet = false
+    @State private var selectedMealId: String?
     @State private var showCamera = false
     @State private var pendingCameraImage: UIImage?
     @State private var showURLAlert = false
@@ -35,7 +37,13 @@ struct DietTab: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
                             TodaySummaryCard(today: t)
-                            MealsListView(meals: t.meals)
+                            MealsListView(
+                                meals: t.meals,
+                                onEditMeal: { id in
+                                    selectedMealId = id
+                                    showEditSheet = true
+                                }
+                            )
                         }
                         .padding()
                         .padding(.bottom, 80)
@@ -81,6 +89,22 @@ struct DietTab: View {
                     }
                 )
                 .onDisappear { pendingCameraImage = nil }
+            }
+            .sheet(isPresented: $showEditSheet) {
+                if let id = selectedMealId {
+                    EditMealSheet(
+                        mealId: id,
+                        onSaved: {
+                            showEditSheet = false
+                            Task { await loadToday() }
+                        },
+                        onDeleted: {
+                            showEditSheet = false
+                            Task { await loadToday() }
+                        },
+                        onCancel: { showEditSheet = false }
+                    )
+                }
             }
             .fullScreenCover(isPresented: $showCamera) {
                 ImagePicker(sourceType: .camera) { img in
@@ -172,6 +196,7 @@ struct MacroBar: View {
 
 struct MealsListView: View {
     let meals: [String: [MealSummary]]
+    var onEditMeal: (String) -> Void = { _ in }
 
     private let order = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -183,7 +208,7 @@ struct MealsListView: View {
                         Text(type.capitalized)
                             .font(.headline)
                         ForEach(list, id: \.id) { m in
-                            MealRow(meal: m)
+                            MealRow(meal: m, onTap: { onEditMeal(m.id) })
                         }
                     }
                 }
@@ -194,8 +219,18 @@ struct MealsListView: View {
 
 struct MealRow: View {
     let meal: MealSummary
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
+        Button {
+            onTap?()
+        } label: {
+            rowContent
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(.systemGray5))
@@ -212,10 +247,14 @@ struct MealRow: View {
             Text("\(Int(meal.total_kcal)) kcal")
                 .font(.subheadline)
                 .fontWeight(.medium)
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding()
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
     }
 
     private func timeString(from iso: String) -> String {
