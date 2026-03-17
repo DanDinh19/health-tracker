@@ -183,8 +183,16 @@ final class DietService {
         guard let http = response as? HTTPURLResponse else { throw DietError.invalidResponse }
         if http.statusCode == 401 { throw DietError.unauthorized }
         if http.statusCode != 200 {
-            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "Unknown error"
-            throw DietError.serverError(status: http.statusCode, message: msg)
+            var msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            if msg == nil, let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                msg = String(body.prefix(100))
+            }
+            if msg == nil || msg == "Unknown error" {
+                msg = http.statusCode == 404
+                    ? "Diet API not found. Ensure the latest code is deployed to Vercel."
+                    : "Request failed"
+            }
+            throw DietError.serverError(status: http.statusCode, message: msg ?? "Request failed")
         }
     }
 }
