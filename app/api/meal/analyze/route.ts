@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/lib/auth";
+import { analyzeFoodImageWithAI } from "@/lib/diet/ai-food-recognition";
 import { foodRecognitionService } from "@/lib/diet/food-recognition";
 import { nutritionLookupService } from "@/lib/diet/nutrition-lookup";
 
@@ -45,9 +46,11 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await imageFile.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const recognized = await foodRecognitionService.recognizeFromImage(buffer);
-
-    const items: Array<{
+    const useAI = !!process.env.OPENAI_API_KEY;
+    console.log(
+      `[meal/analyze] OPENAI_API_KEY ${useAI ? "set" : "NOT set"} → using ${useAI ? "AI" : "stub"}`
+    );
+    let items: Array<{
       id: string;
       name: string;
       confidence: number;
@@ -60,36 +63,51 @@ export async function POST(request: NextRequest) {
       fat_g: number;
     }> = [];
 
-    let totalKcal = 0;
-    let totalProteinG = 0;
-    let totalCarbsG = 0;
-    let totalFatG = 0;
-
-    for (let i = 0; i < recognized.length; i++) {
-      const r = recognized[i];
-      const qty = parsePortionToQuantity(r.estimatedPortion);
-      const unit = parsePortionToUnit(r.estimatedPortion);
-      const nutrition = await nutritionLookupService.lookup(r.name, qty, unit);
-
-      const id = `item-${i}-${Date.now()}`;
-      items.push({
-        id,
-        name: r.name,
-        confidence: r.confidence,
-        estimated_portion: r.estimatedPortion,
-        quantity: qty,
-        unit,
-        kcal: nutrition.kcal,
-        protein_g: nutrition.proteinG,
-        carbs_g: nutrition.carbsG,
-        fat_g: nutrition.fatG,
-      });
-
-      totalKcal += nutrition.kcal;
-      totalProteinG += nutrition.proteinG;
-      totalCarbsG += nutrition.carbsG;
-      totalFatG += nutrition.fatG;
+    if (useAI) {
+      const aiItems = await analyzeFoodImageWithAI(buffer);
+      for (let i = 0; i < aiItems.length; i++) {
+        const r = aiItems[i];
+        const qty = parsePortionToQuantity(r.estimatedPortion);
+        const unit = parsePortionToUnit(r.estimatedPortion);
+        items.push({
+          id: `item-${i}-${Date.now()}`,
+          name: r.name,
+          confidence: r.confidence,
+          estimated_portion: r.estimatedPortion,
+          quantity: qty,
+          unit,
+          kcal: r.kcal,
+          protein_g: r.protein_g,
+          carbs_g: r.carbs_g,
+          fat_g: r.fat_g,
+        });
+      }
+    } else {
+      const recognized = await foodRecognitionService.recognizeFromImage(buffer);
+      for (let i = 0; i < recognized.length; i++) {
+        const r = recognized[i];
+        const qty = parsePortionToQuantity(r.estimatedPortion);
+        const unit = parsePortionToUnit(r.estimatedPortion);
+        const nutrition = await nutritionLookupService.lookup(r.name, qty, unit);
+        items.push({
+          id: `item-${i}-${Date.now()}`,
+          name: r.name,
+          confidence: r.confidence,
+          estimated_portion: r.estimatedPortion,
+          quantity: qty,
+          unit,
+          kcal: nutrition.kcal,
+          protein_g: nutrition.proteinG,
+          carbs_g: nutrition.carbsG,
+          fat_g: nutrition.fatG,
+        });
+      }
     }
+
+    const totalKcal = items.reduce((s, i) => s + i.kcal, 0);
+    const totalProteinG = items.reduce((s, i) => s + i.protein_g, 0);
+    const totalCarbsG = items.reduce((s, i) => s + i.carbs_g, 0);
+    const totalFatG = items.reduce((s, i) => s + i.fat_g, 0);
 
     const photoUrl = getPhotoUrl(userId, timestamp.toISOString());
 
@@ -102,6 +120,7 @@ export async function POST(request: NextRequest) {
       total_protein_g: Math.round(totalProteinG * 10) / 10,
       total_carbs_g: Math.round(totalCarbsG * 10) / 10,
       total_fat_g: Math.round(totalFatG * 10) / 10,
+      analysis_source: useAI ? "ai" : "stub",
     });
   } catch (err) {
     console.error("Meal analyze error:", err);
@@ -120,5 +139,15 @@ function parsePortionToQuantity(portion: string): number {
 }
 
 function parsePortionToUnit(portion: string): string {
-  return "serving"; // Simplified; could parse "piece", "cup", "slice", etc.
+  const lower = portion.toLowerCase();
+  if (lower.includes("cup")) return "cup";
+  if (lower.includes("tbsp") || lower.includes("tablespoon")) return "tbsp";
+  if (lower.includes("tsp") || lower.includes("teaspoon")) return "tsp";
+  if (lower.includes("oz") || lower.includes("ounce")) return "oz";
+  if (lower.includes("g ") || lower.includes("gram")) return "g";
+  if (lower.includes("slice")) return "slice";
+  if (lower.includes("egg")) return "egg";
+  if (lower.includes("piece") || lower.includes("pc")) return "piece";
+  if (lower.includes("serving")) return "serving";
+  return "serving";
 }

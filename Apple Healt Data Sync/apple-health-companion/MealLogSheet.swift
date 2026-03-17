@@ -1,15 +1,18 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 // MARK: - Meal Log Sheet (camera / photo / analyze / review)
 
 struct MealLogSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onSaved: () -> Void
+    var initialImage: UIImage? = nil
+    var onRequestCamera: (() -> Void)? = nil
 
     @State private var showSourcePicker = true
-    @State private var showCamera = false
     @State private var showPhotoPicker = false
+    @State private var showCameraUnavailableAlert = false
     @State private var selectedImage: UIImage?
     @State private var analyzing = false
     @State private var analyzeError: String?
@@ -21,10 +24,10 @@ struct MealLogSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if showSourcePicker && !analyzing && analyzeResult == nil {
-                    sourcePickerView
-                } else if analyzing {
+                if initialImage != nil || analyzing {
                     analyzingView
+                } else if showSourcePicker && analyzeResult == nil {
+                    sourcePickerView
                 } else if let result = analyzeResult {
                     ReviewMealView(
                         result: result,
@@ -54,12 +57,6 @@ struct MealLogSheet: View {
                     }
                 }
             }
-            .fullScreenCover(isPresented: $showCamera) {
-                ImagePicker(sourceType: .camera) { img in
-                    showCamera = false
-                    if let img { selectedImage = img; startAnalyze(img) }
-                }
-            }
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoLibraryPicker(selection: $photoPickerItem) {
@@ -78,6 +75,19 @@ struct MealLogSheet: View {
                 }
             }
         }
+        .onAppear {
+            if let img = initialImage {
+                startAnalyze(img)
+            }
+        }
+        .alert("Camera unavailable", isPresented: $showCameraUnavailableAlert) {
+            Button("Use photo library") {
+                showPhotoPicker = true
+            }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The camera isn't available on this device (e.g. Simulator). Use \"Choose from library\" to select a photo instead.")
+        }
     }
 
     @State private var photoPickerItem: PhotosPickerItem?
@@ -90,8 +100,11 @@ struct MealLogSheet: View {
                 .multilineTextAlignment(.center)
             VStack(spacing: 12) {
                 Button {
-                    showSourcePicker = false
-                    showCamera = true
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        onRequestCamera?()
+                    } else {
+                        showCameraUnavailableAlert = true
+                    }
                 } label: {
                     Label("Take photo", systemImage: "camera.fill")
                         .frame(maxWidth: .infinity)

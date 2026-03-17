@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 // MARK: - Diet Tab (main)
 
@@ -8,6 +9,8 @@ struct DietTab: View {
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var showLogSheet = false
+    @State private var showCamera = false
+    @State private var pendingCameraImage: UIImage?
     @State private var showURLAlert = false
 
     private let dietService = DietService()
@@ -65,10 +68,28 @@ struct DietTab: View {
                 .padding(.bottom, 16)
             }
             .sheet(isPresented: $showLogSheet) {
-                MealLogSheet(onSaved: {
-                    showLogSheet = false
-                    Task { await loadToday() }
-                })
+                MealLogSheet(
+                    onSaved: {
+                        showLogSheet = false
+                        pendingCameraImage = nil
+                        Task { await loadToday() }
+                    },
+                    initialImage: pendingCameraImage,
+                    onRequestCamera: {
+                        showLogSheet = false
+                        showCamera = true
+                    }
+                )
+                .onDisappear { pendingCameraImage = nil }
+            }
+            .fullScreenCover(isPresented: $showCamera) {
+                ImagePicker(sourceType: .camera) { img in
+                    showCamera = false
+                    if let img {
+                        pendingCameraImage = img
+                        showLogSheet = true
+                    }
+                }
             }
             .alert("Configure URL first", isPresented: $showURLAlert) {
                 Button("OK", role: .cancel) {}
