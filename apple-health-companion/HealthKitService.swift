@@ -40,6 +40,7 @@ final class HealthKitService {
         let typesToRead: Set<HKObjectType> = [
             HKObjectType.workoutType(),
             HKObjectType.activitySummaryType(),
+            HKObjectType.quantityType(forIdentifier: .stepCount)!,
         ]
 
         try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
@@ -47,7 +48,9 @@ final class HealthKitService {
 
     func fetchWorkouts(days: Int = 14) async throws -> [WorkoutPayload] {
         let end = Date()
-        let start = Calendar.current.date(byAdding: .day, value: -days, to: end)!
+        guard let start = Calendar.current.date(byAdding: .day, value: -days, to: end) else {
+            throw HealthKitError.notAvailable
+        }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -69,10 +72,50 @@ final class HealthKitService {
         }
     }
 
+    func fetchStepsByHour(for date: Date) async throws -> [(hour: Int, steps: Int)] {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            throw HealthKitError.notAvailable
+        }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            throw HealthKitError.notAvailable
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+        let interval = DateComponents(hour: 1)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum,
+                anchorDate: startOfDay,
+                intervalComponents: interval
+            )
+            query.initialResultsHandler = { _, results, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                var data: [(hour: Int, steps: Int)] = []
+                results?.enumerateStatistics(from: startOfDay, to: endOfDay) { statistics, _ in
+                    let steps = Int(statistics.sumQuantity()?.doubleValue(for: .count()) ?? 0)
+                    let hour = calendar.component(.hour, from: statistics.startDate)
+                    data.append((hour: hour, steps: steps))
+                }
+                data.sort { $0.hour < $1.hour }
+                continuation.resume(returning: data)
+            }
+            healthStore.execute(query)
+        }
+    }
+
     func fetchActivitySummaries(days: Int = 14) async throws -> [ActivitySummaryPayload] {
         let calendar = Calendar.current
         let end = Date()
-        let start = calendar.date(byAdding: .day, value: -days, to: end)!
+        guard let start = calendar.date(byAdding: .day, value: -days, to: end) else {
+            throw HealthKitError.notAvailable
+        }
         var startComponents = calendar.dateComponents([.year, .month, .day, .era], from: calendar.startOfDay(for: start))
         startComponents.calendar = calendar
         var endComponents = calendar.dateComponents([.year, .month, .day, .era], from: end)

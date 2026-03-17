@@ -20,6 +20,7 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   ouraData             OuraData[]
+  meals                Meal[]
 
   @@map("users")
 }
@@ -119,6 +120,48 @@ model AppleHealthActivitySummary {
   @@unique([userId, date])
   @@index([userId, date])
   @@map("apple_health_activity_summaries")
+}
+
+// Diet: meals and items (from photo AI or manual)
+model Meal {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  timestamp     DateTime  @map("timestamp")
+  mealType      String    @map("meal_type") // breakfast, lunch, dinner, snack
+  photoUrl      String?   @map("photo_url")
+  totalKcal     Float     @map("total_kcal")
+  totalProteinG Float     @map("total_protein_g")
+  totalCarbsG   Float     @map("total_carbs_g")
+  totalFatG     Float     @map("total_fat_g")
+  source        String    @default("photo") // photo, manual
+  notes         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items MealItem[]
+
+  @@index([userId, timestamp])
+  @@map("meals")
+}
+
+model MealItem {
+  id         String  @id @default(cuid())
+  mealId     String  @map("meal_id")
+  foodName   String  @map("food_name")
+  foodRefId  String? @map("food_ref_id") // USDA or external DB id
+  quantity   Float
+  unit       String  // piece, cup, gram, oz, etc.
+  kcal       Float
+  proteinG   Float   @map("protein_g")
+  carbsG     Float   @map("carbs_g")
+  fatG       Float   @map("fat_g")
+  confidence Float?  // 0-1 from AI
+  portion    String? // e.g. "2 eggs", "1 slice"
+
+  meal Meal @relation(fields: [mealId], references: [id], onDelete: Cascade)
+
+  @@index([mealId])
+  @@map("meal_items")
 }
 
 // One health entry per record (e.g. weight, steps, mood for a given day)

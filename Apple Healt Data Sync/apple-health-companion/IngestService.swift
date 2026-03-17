@@ -3,7 +3,12 @@ import Foundation
 /// Sends HealthKit data to your Health Tracker web app
 final class IngestService {
     private var baseURL: String {
-        UserDefaults.standard.string(forKey: "ingestBaseURL") ?? "https://your-app.vercel.app"
+        var raw = UserDefaults.standard.string(forKey: "ingestBaseURL") ?? "https://your-app.vercel.app"
+        raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.hasPrefix("http://") && !raw.hasPrefix("https://") {
+            raw = "https://" + raw
+        }
+        return raw.replacingOccurrences(of: "/$", with: "", options: .regularExpression)
     }
     private var apiKey: String {
         UserDefaults.standard.string(forKey: "appleHealthApiKey") ?? ""
@@ -16,6 +21,9 @@ final class IngestService {
         guard !apiKey.isEmpty else {
             throw IngestError.unauthorized
         }
+        guard !baseURL.contains("your-app.vercel.app") else {
+            throw IngestError.invalidURL
+        }
         try await healthKit.requestAuthorization()
         let workouts = try await healthKit.fetchWorkouts(days: days)
         let activitySummaries = try await healthKit.fetchActivitySummaries(days: days)
@@ -25,7 +33,8 @@ final class IngestService {
             "activitySummaries": activitySummaries.map { summaryToDict($0) }
         ]
 
-        guard let url = URL(string: "\(baseURL)/api/apple-health/ingest") else {
+        let urlString = "\(baseURL)/api/apple-health/ingest"
+        guard let url = URL(string: urlString), url.scheme == "https" || url.scheme == "http" else {
             throw IngestError.invalidURL
         }
 
@@ -35,7 +44,14 @@ final class IngestService {
         request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let urlError as URLError where urlError.code == .unsupportedURL {
+            throw IngestError.invalidURL
+        } catch {
+            throw error
+        }
 
         guard let http = response as? HTTPURLResponse else {
             throw IngestError.invalidResponse
@@ -94,7 +110,7 @@ enum IngestError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL: return "Invalid ingest URL"
+        case .invalidURL: return "Invalid web app URL. In Settings, use format: https://your-app.vercel.app"
         case .invalidResponse: return "Invalid server response"
         case .unauthorized: return "Add your API key in Settings. Generate one in your web app (Dashboard → Activities)."
         case .serverError(let status, let msg): return "Server error \(status): \(msg)"

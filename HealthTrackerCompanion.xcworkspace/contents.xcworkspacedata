@@ -2,6 +2,6 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "container:Apple Healt Data Sync/Apple Healt Data Sync.xcodeproj">
+      location = "container:Apple Healt Data Sync/apple-health-companion.xcodeproj">
    </FileRef>
 </Workspace>
