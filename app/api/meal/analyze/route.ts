@@ -3,11 +3,7 @@ import { getUserId } from "@/lib/auth";
 import { analyzeFoodImageWithAI } from "@/lib/diet/ai-food-recognition";
 import { foodRecognitionService } from "@/lib/diet/food-recognition";
 import { nutritionLookupService } from "@/lib/diet/nutrition-lookup";
-
-// TODO: Store image in S3/Vercel Blob. For now return placeholder URL.
-function getPhotoUrl(_userId: string, _timestamp: string): string {
-  return `https://placeholder.local/meal-${Date.now()}.jpg`;
-}
+import { uploadMealPhoto } from "@/lib/diet/meal-photo-upload";
 
 function guessMealType(utcHour: number): "breakfast" | "lunch" | "dinner" | "snack" {
   if (utcHour >= 5 && utcHour < 11) return "breakfast";
@@ -109,7 +105,9 @@ export async function POST(request: NextRequest) {
     const totalCarbsG = items.reduce((s, i) => s + i.carbs_g, 0);
     const totalFatG = items.reduce((s, i) => s + i.fat_g, 0);
 
-    const photoUrl = getPhotoUrl(userId, timestamp.toISOString());
+    const photoUrl =
+      (await uploadMealPhoto(buffer, userId, timestamp.toISOString())) ??
+      `https://placeholder.local/meal-${Date.now()}.jpg`;
 
     return NextResponse.json({
       photo_url: photoUrl,

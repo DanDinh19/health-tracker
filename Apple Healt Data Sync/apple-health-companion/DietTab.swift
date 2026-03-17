@@ -232,9 +232,7 @@ struct MealRow: View {
 
     private var rowContent: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(.systemGray5))
-                .frame(width: 48, height: 48)
+            mealThumbnail
             VStack(alignment: .leading, spacing: 2) {
                 Text(meal.short_description)
                     .font(.subheadline)
@@ -255,6 +253,38 @@ struct MealRow: View {
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var mealThumbnail: some View {
+        if let urlString = meal.photo_url,
+           !urlString.contains("placeholder"),
+           let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure:
+                    placeholderRect
+                case .empty:
+                    placeholderRect
+                @unknown default:
+                    placeholderRect
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            placeholderRect
+        }
+    }
+
+    private var placeholderRect: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color(.systemGray5))
+            .frame(width: 48, height: 48)
     }
 
     private func timeString(from iso: String) -> String {
