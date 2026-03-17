@@ -2,6 +2,12 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
+// MARK: - Meal to edit (for sheet presentation)
+
+private struct MealToEdit: Identifiable {
+    let id: String
+}
+
 // MARK: - Diet Tab (main)
 
 struct DietTab: View {
@@ -9,8 +15,7 @@ struct DietTab: View {
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var showLogSheet = false
-    @State private var showEditSheet = false
-    @State private var selectedMealId: String?
+    @State private var mealToEdit: MealToEdit?
     @State private var showCamera = false
     @State private var pendingCameraImage: UIImage?
     @State private var showURLAlert = false
@@ -40,8 +45,7 @@ struct DietTab: View {
                             MealsListView(
                                 meals: t.meals,
                                 onEditMeal: { id in
-                                    selectedMealId = id
-                                    showEditSheet = true
+                                    mealToEdit = MealToEdit(id: id)
                                 }
                             )
                         }
@@ -90,21 +94,19 @@ struct DietTab: View {
                 )
                 .onDisappear { pendingCameraImage = nil }
             }
-            .sheet(isPresented: $showEditSheet) {
-                if let id = selectedMealId {
-                    EditMealSheet(
-                        mealId: id,
-                        onSaved: {
-                            showEditSheet = false
-                            Task { await loadToday() }
-                        },
-                        onDeleted: {
-                            showEditSheet = false
-                            Task { await loadToday() }
-                        },
-                        onCancel: { showEditSheet = false }
-                    )
-                }
+            .sheet(item: $mealToEdit) { meal in
+                EditMealSheet(
+                    mealId: meal.id,
+                    onSaved: {
+                        mealToEdit = nil
+                        Task { await loadToday() }
+                    },
+                    onDeleted: {
+                        mealToEdit = nil
+                        Task { await loadToday() }
+                    },
+                    onCancel: { mealToEdit = nil }
+                )
             }
             .fullScreenCover(isPresented: $showCamera) {
                 ImagePicker(sourceType: .camera) { img in

@@ -61,39 +61,61 @@ export async function getCurrentUserId(): Promise<string | null> {
   return error || !user ? null : user.id;
 }
 
-export async function getOuraAccessToken(): Promise<{ token: string; userId: string } | null> {
-  const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-
+export async function getOuraAccessTokenForUser(userId: string): Promise<{ token: string; userId: string } | null> {
   const dbUser = await prisma.user.findUnique({
-    where: { id: user.id },
+    where: { id: userId },
   });
   if (!dbUser?.ouraAccessToken) return null;
 
   let token = dbUser.ouraAccessToken;
   if (dbUser.ouraTokenExpiresAt && new Date() > dbUser.ouraTokenExpiresAt && dbUser.ouraRefreshToken) {
-    // Serialize refresh per user - Oura refresh tokens are single-use
-    let refreshPromise = refreshLocks.get(user.id);
+    let refreshPromise = refreshLocks.get(userId);
     if (!refreshPromise) {
       refreshPromise = (async () => {
         try {
-          return await refreshOuraToken(user.id, dbUser!.ouraRefreshToken!);
+          return await refreshOuraToken(userId, dbUser!.ouraRefreshToken!);
         } finally {
-          refreshLocks.delete(user.id);
+          refreshLocks.delete(userId);
         }
       })();
-      refreshLocks.set(user.id, refreshPromise);
+      refreshLocks.set(userId, refreshPromise);
     }
     const refreshed = await refreshPromise;
     if (refreshed) {
       token = refreshed;
     } else {
-      await clearOuraTokens(user.id);
+      await clearOuraTokens(userId);
       return null;
     }
   }
-  return { token, userId: user.id };
+  return { token, userId };
+}
+
+export async function getOuraAccessToken(): Promise<{ token: string; userId: string } | null> {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  return getOuraAccessTokenForUser(user.id);
+}
+
+export async function fetchOuraForUser<T>(
+  userId: string,
+  token: string,
+  endpoint: string,
+  params: Record<string, string>
+): Promise<T> {
+  const qs = new URLSearchParams(params).toString();
+  const url = `${OURA_BASE}/${endpoint}?${qs}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) {
+    await clearOuraTokens(userId);
+    throw new Error("Oura token expired or invalid. Please reconnect your ring.");
+  }
+  if (!res.ok) throw new Error(`Oura API error: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchOura<T>(
@@ -102,16 +124,5 @@ export async function fetchOura<T>(
 ): Promise<T> {
   const auth = await getOuraAccessToken();
   if (!auth) throw new Error("Not signed in or Oura not connected");
-
-  const qs = new URLSearchParams(params).toString();
-  const url = `${OURA_BASE}/${endpoint}?${qs}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${auth.token}` },
-  });
-  if (res.status === 401) {
-    await clearOuraTokens(auth.userId);
-    throw new Error("Oura token expired or invalid. Please reconnect your ring.");
-  }
-  if (!res.ok) throw new Error(`Oura API error: ${res.status}`);
-  return res.json();
+  return fetchOuraForUser(auth.userId, auth.token, endpoint, params);
 }

@@ -127,13 +127,12 @@ struct ReviewMealView: View {
 struct MealItemCard: View {
     @Binding var item: EditableMealItem
     let onDelete: () -> Void
+    var thumbnailURL: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(.systemGray5))
-                    .frame(width: 40, height: 40)
+                itemThumbnail
                 VStack(alignment: .leading, spacing: 2) {
                     TextField("Food name", text: $item.name)
                         .font(.subheadline)
@@ -168,6 +167,36 @@ struct MealItemCard: View {
         .padding()
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private var itemThumbnail: some View {
+        if let urlString = thumbnailURL,
+           !urlString.contains("placeholder"),
+           let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure, .empty:
+                    thumbnailPlaceholder
+                @unknown default:
+                    thumbnailPlaceholder
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        } else {
+            thumbnailPlaceholder
+        }
+    }
+
+    private var thumbnailPlaceholder: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color(.systemGray5))
+            .frame(width: 40, height: 40)
     }
 
     private func confidencePill(confidence: Double) -> some View {

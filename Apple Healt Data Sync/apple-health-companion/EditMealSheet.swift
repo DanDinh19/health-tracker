@@ -46,7 +46,8 @@ struct EditMealSheet: View {
                             ForEach(items.indices, id: \.self) { index in
                                 MealItemCard(
                                     item: $items[index],
-                                    onDelete: { items.removeAll { $0.id == items[index].id } }
+                                    onDelete: { items.removeAll { $0.id == items[index].id } },
+                                    thumbnailURL: m.photo_url
                                 )
                             }
                         }

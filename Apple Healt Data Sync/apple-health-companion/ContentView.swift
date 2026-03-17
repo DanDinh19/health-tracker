@@ -49,13 +49,16 @@ struct SummaryTab: View {
     @State private var blinkOpacity: Double = 1
     @State private var averageStepsData: [(hour: Double, cumulative: Int)] = []
     @State private var selectedBarLabel: String?
+    @State private var dietToday: DietTodayResponse?
 
     private let healthKit = HealthKitService()
+    private let dietService = DietService()
     private let lineWidth: CGFloat = 2
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                caloriesCard
                 // Range tabs
                 HStack(spacing: 0) {
                     ForEach(StepsRange.allCases, id: \.self) { range in
@@ -213,9 +216,14 @@ struct SummaryTab: View {
             .navigationTitle("Summary")
             .task {
                 await loadSteps()
+                await loadDietToday()
             }
             .refreshable {
                 await loadSteps()
+                await loadDietToday()
+            }
+            .onAppear {
+                Task { await loadDietToday() }
             }
             .overlay(alignment: .bottom) {
                 if !loading && errorMessage == nil {
@@ -242,6 +250,75 @@ struct SummaryTab: View {
             } message: {
                 Text("Go to Sync tab → Settings and add your web app URL.")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var caloriesCard: some View {
+        if let d = dietToday {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Calories today")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("\(d.total_kcal) / \(d.target_kcal) kcal")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Text("\(Int(d.total_protein_g))g protein · \(Int(d.total_carbs_g))g carbs · \(Int(d.total_fat_g))g fat")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    MacroBar(value: d.total_protein_g, target: Double(d.target_protein_g), label: "P")
+                    MacroBar(value: d.total_carbs_g, target: Double(d.target_carbs_g), label: "C")
+                    MacroBar(value: d.total_fat_g, target: Double(d.target_fat_g), label: "F")
+                }
+                timeSinceLastMealView(lastMealDate: lastMealTimestamp(from: d))
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemGray6))
+        }
+    }
+
+    private func lastMealTimestamp(from d: DietTodayResponse) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime]
+        var latest: Date?
+        for (_, list) in d.meals {
+            for m in list {
+                let date = formatter.date(from: m.timestamp) ?? fallback.date(from: m.timestamp)
+                if let parsed = date, (latest == nil || parsed > latest!) {
+                    latest = parsed
+                }
+            }
+        }
+        return latest
+    }
+
+    @ViewBuilder
+    private func timeSinceLastMealView(lastMealDate: Date?) -> some View {
+        if let last = lastMealDate {
+            TimelineView(.periodic(from: .now, by: 1.0)) { timeline in
+                Text(timeSinceString(from: last, to: timeline.date))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func timeSinceString(from start: Date, to now: Date) -> String {
+        let interval = now.timeIntervalSince(start)
+        guard interval >= 0 else { return "Just now" }
+        let m = Int(interval) / 60
+        let h = m / 60
+        let mins = m % 60
+        if h > 0 {
+            return "\(h)h \(mins)m since last meal"
+        } else if mins > 0 {
+            return "\(mins)m since last meal"
+        } else {
+            return "Just now"
         }
     }
 
@@ -322,6 +399,165 @@ struct SummaryTab: View {
                 errorMessage = error.localizedDescription
                 stepsData = []
                 averageStepsData = []
+            }
+        }
+        await MainActor.run { loading = false }
+    }
+
+    private func loadDietToday() async {
+        do {
+            let t = try await dietService.fetchToday()
+            await MainActor.run { dietToday = t }
+        } catch {
+            await MainActor.run { dietToday = nil }
+        }
+    }
+}
+
+// MARK: - Sleep tab (Oura last 24h)
+struct SleepTab: View {
+    @State private var blocks: [SleepBlockResponse] = []
+    @State private var loading = true
+    @State private var errorMessage: String?
+    @State private var showSafari = false
+    @State private var showURLAlert = false
+
+    private let ouraService = OuraSleepService()
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if loading {
+                    Spacer()
+                    ProgressView("Loading sleep data…")
+                    Spacer()
+                } else if let err = errorMessage {
+                    Spacer()
+                    VStack(spacing: 16) {
+                        Text(err)
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding()
+                        if err.lowercased().contains("oura") || err.lowercased().contains("connect") {
+                            Button {
+                                if webBaseURL.contains("your-app.vercel.app") {
+                                    showURLAlert = true
+                                } else if let url = URL(string: webBaseURL + "/") {
+                                    showSafari = true
+                                }
+                            } label: {
+                                Label("Connect Oura in web app", systemImage: "safari")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    Spacer()
+                } else {
+                    Text("Sleep (last 24 hours)")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
+                    sleepTimelineView
+                    sleepLegend
+                    Spacer()
+                }
+            }
+            .navigationTitle("Sleep")
+            .task { await loadSleep() }
+            .refreshable { await loadSleep() }
+            .sheet(isPresented: $showSafari) {
+                if let url = URL(string: webBaseURL + "/") {
+                    SafariView(url: url)
+                }
+            }
+            .alert("Configure URL first", isPresented: $showURLAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Go to Sync tab → Settings and add your web app URL.")
+            }
+        }
+    }
+
+    private var sleepTimelineView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 0) {
+                ForEach(0..<13, id: \.self) { i in
+                    Text(hourLabel(i * 2))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 4)
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(blocks.indices, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(colorForStage(blocks[i].stage))
+                            .frame(width: max(1, (geo.size.width - 287) / 288))
+                    }
+                }
+            }
+            .frame(height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(.horizontal)
+    }
+
+    private var sleepLegend: some View {
+        HStack(spacing: 16) {
+            legendItem(color: Color(red: 0, green: 0.33, blue: 0.61), label: "Deep")
+            legendItem(color: Color(red: 0.31, green: 0.76, blue: 0.97), label: "Light")
+            legendItem(color: Color(red: 0.01, green: 0.53, blue: 0.82), label: "REM")
+            legendItem(color: Color(red: 0.3, green: 0.69, blue: 0.31), label: "Awake")
+            legendItem(color: Color(.systemGray5), label: "No data")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.top, 12)
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 12, height: 12)
+            Text(label)
+        }
+    }
+
+    private func colorForStage(_ stage: Int) -> Color {
+        switch stage {
+        case 1: return Color(red: 0, green: 0.33, blue: 0.61)
+        case 2: return Color(red: 0.31, green: 0.76, blue: 0.97)
+        case 3: return Color(red: 0.01, green: 0.53, blue: 0.82)
+        case 4: return Color(red: 0.3, green: 0.69, blue: 0.31)
+        default: return Color(.systemGray5)
+        }
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        switch hour {
+        case 0, 24: return "12AM"
+        case 6: return "6AM"
+        case 12: return "12PM"
+        case 18: return "6PM"
+        default: return "\(hour % 24)"
+        }
+    }
+
+    private func loadSleep() async {
+        loading = true
+        errorMessage = nil
+        do {
+            let res = try await ouraService.fetchSleepLast24()
+            await MainActor.run { blocks = res.blocks }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                blocks = []
             }
         }
         await MainActor.run { loading = false }
@@ -485,7 +721,7 @@ struct ContentView: View {
                 .tabItem {
                     Label("Diet", systemImage: "fork.knife")
                 }
-            WebLinkTab(title: "Sleep", icon: "bed.double.fill", path: "/dashboard/sleep")
+            SleepTab()
                 .tabItem {
                     Label("Sleep", systemImage: "bed.double.fill")
                 }
