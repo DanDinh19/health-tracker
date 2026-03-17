@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { zonedTimeToUtc } from "date-fns-tz";
+import { fromZonedTime } from "date-fns-tz";
 import { getUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
     const [y, m, d] = todayStr.split("-").map(Number);
     const startLocal = new Date(y, m - 1, d, 0, 0, 0, 0);
     const endLocal = new Date(y, m - 1, d, 23, 59, 59, 999);
-    const startOfDay = zonedTimeToUtc(startLocal, tz);
-    const endOfDay = zonedTimeToUtc(endLocal, tz);
+    const startOfDay = fromZonedTime(startLocal, tz);
+    const endOfDay = fromZonedTime(endLocal, tz);
 
     const meals = await prisma.meal.findMany({
       where: {
